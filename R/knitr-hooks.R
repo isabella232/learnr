@@ -408,6 +408,13 @@ tutorial_knitr_options <- function() {
           )
         )
 
+        if (is_testing_enabled()) {
+          withr::with_options(
+            c('knitr.duplicate.label' = 'allow'),
+            test_that_exercise(this_exercise)
+          )
+        }
+
         # script tag with knit options for this chunk
         caption <-
           if (!is.null(options$exercise.cap)) {

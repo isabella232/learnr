@@ -118,3 +118,13 @@ html_code_block <- function(x, escape = TRUE) {
 
   sprintf("<pre><code>%s</code></pre>", x)
 }
+
+is_envvar_true <- function(name, default = "false") {
+  x <- Sys.getenv(name, default)
+  if (tolower(x) %in% c("yes", "true", "1", "on")) return(TRUE)
+  if (tolower(x) %in% c("no", "false", "0", "off")) return(FALSE)
+  stop(
+    "Invalid value for `", name, "` environment variable, ",
+    "must be `true` or `false`."
+  )
+}
