@@ -5,21 +5,20 @@ is_testing_enabled <- function() {
 }
 
 find_test_exercise <- function() {
-  x <- get0("ex", envir = .test_exercise, inherits = FALSE, ifnotfound = NULL)
+  x <- get0("exercise", envir = .test_exercise, ifnotfound = NULL)
   if (is.null(x)) {
     rlang::abort("Please provide an `.exercise`.")
   }
   x
 }
 
-clear_test_exercise <- function() {
-  if (exists("ex", envir = .test_exercise, inherits = FALSE)) {
-    rm("ex", envir = .test_exercise)
-  }
+clear_test_env <- function() {
+  rm(list = ls(envir = .test_exercise), envir = .test_exercise)
 }
 
-set_test_exercise <- function(ex) {
-  assign("ex", ex, envir = .test_exercise)
+set_test_env <- function(name, value) {
+  assign(name, value, envir = .test_exercise)
+  invisible(value)
 }
 
 #' @export
@@ -46,10 +45,15 @@ expect_feedback <- function(
   .exercise <- .exercise %||% find_test_exercise()
   .exercise[["code"]] <- expr
 
-  # TODO: take another look at this
   .envir <- .envir %||% new.env(parent = knitr::knit_global())
 
-  res <- evaluate_exercise(.exercise, .envir, evaluate_global_setup = .eval_global_setup)
+  res <- evaluate_exercise(
+    exercise = .exercise,
+    envir = .envir,
+    evaluate_global_setup = TRUE
+  )
+
+  .label <- .label %||% .exercise$label
 
   lab <- if (!is.null(.label)) {
     sprintf("'%s'", .label)
@@ -224,10 +228,9 @@ test_that_exercise <- function(exercise, test_solutions = NULL) {
 
   names(tests) <- sprintf("[%s] - %s", exercise$label, names(tests))
 
-  set_test_exercise(exercise)
-  withr::defer(clear_test_exercise())
-
-  testthat::context(exercise$label)
+  set_test_env("exercise", exercise)
+  testthat::context(set_test_env("label", exercise$label))
+  withr::defer(clear_test_env())
 
   for (i in seq_along(tests)) {
     args <- list(
@@ -238,6 +241,8 @@ test_that_exercise <- function(exercise, test_solutions = NULL) {
     test_that <- rlang::call2("test_that", !!!args, .ns = "testthat")
     rlang::eval_bare(test_that)
   }
+
+  invisible(TRUE)
 }
 
 prepend_solution_tests <- function(exercise, tests) {
