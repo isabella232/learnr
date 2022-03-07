@@ -156,3 +156,10 @@ expr_as_text <- function(expr, language = "r") {
     rlang::expr_text(expr)
   }
 }
+
+cat_rule <- function(x) {
+  txt <- sprintf("\u2500\u2500\u2500 %s ", x)
+  rhs <- rep("\u2500", times = getOption("width") * 0.8 - nchar(txt) - 2L)
+  txt <- paste0(txt, paste0(rhs, collapse = ""))
+  cat("\n", txt, "\n", sep = "")
+}
