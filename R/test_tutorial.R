@@ -263,12 +263,12 @@ prepend_solution_tests <- function(exercise, tests) {
 }
 
 test_tutorial <- function(
-    path,
-    test = c("all", "solutions", "tests"),
-    ...,
-    quiet = TRUE,
-    safely = TRUE,
-    reporter = NULL
+  path,
+  test = c("all", "solutions", "tests"),
+  ...,
+  quiet = TRUE,
+  safely = TRUE,
+  reporter = NULL
 ) {
   test <- match.arg(test)
 
