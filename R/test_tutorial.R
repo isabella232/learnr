@@ -41,14 +41,7 @@ expect_feedback <- function(
   rlang::check_installed("testthat", reason = "Testing exercise feedback requires {testthat}")
 
   expr <- rlang::enexpr(expr)
-  expr <- if (rlang::is_null(expr)) {
-    ""
-  } else if (rlang::is_string(expr)) {
-    # we don't want double-quoting of strings
-    expr
-  } else {
-    rlang::expr_text(expr)
-  }
+  expr <- expr_as_text(expr, .exercise$engine %||% "r") %||% ""
 
   .exercise <- .exercise %||% find_test_exercise()
   .exercise[["code"]] <- expr

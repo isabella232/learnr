@@ -128,3 +128,31 @@ is_envvar_true <- function(name, default = "false") {
     "must be `true` or `false`."
   )
 }
+
+expr_as_text <- function(expr, language = "r") {
+  is_r_code <- identical(tolower(language), "r")
+
+  if (rlang::is_null(expr)) {
+    return(NULL)
+  }
+
+  if (is_r_code && rlang::is_string(expr)) {
+    expr <- rlang::parse_expr(expr)
+  }
+
+  if (rlang::is_string(expr)) {
+    return(expr)
+  }
+
+  if (!is_r_code) {
+    rlang::abort("Bare expressions are only valid for exercises with R code engines")
+  }
+
+  if (length(expr) > 1 && identical(expr[[1]], rlang::sym("{"))) {
+    # unwrap one level of braces
+    x <- vapply(as.list(expr[-1]), FUN.VALUE = character(1), rlang::expr_text)
+    paste(x, collapse = "\n")
+  } else {
+    rlang::expr_text(expr)
+  }
+}
