@@ -272,15 +272,15 @@ test_tutorial <- function(
 ) {
   test <- match.arg(test)
 
-  test_env <- safe_env()
+  test_env_vars <- safe_env()
   if (identical(test, "all")) {
     test <- c("solutions", "tests")
   }
   if ("tests" %in% test) {
-    test_env <- c(test_env, LEARNR_TEST = "true")
+    test_env_vars <- c(test_env_vars, LEARNR_TEST = "true")
   }
   if ("solutions" %in% test) {
-    test_env <- c(test_env, LEARNR_TEST_SOLUTIONS = "true")
+    test_env_vars <- c(test_env_vars, LEARNR_TEST_SOLUTIONS = "true")
   }
 
   render_call <- rlang::call2(
@@ -292,7 +292,9 @@ test_tutorial <- function(
     .ns = "rmarkdown"
   )
 
-  reporter <- reporter %||% testthat::get_reporter() %||% "progress"
+  reporter <- reporter %||%
+    testthat::get_reporter() %||%
+    if (interactive() && !safely) "progress" else "summary"
 
   res <- tryCatch({
     if (isTRUE(safely)) {
@@ -301,11 +303,11 @@ test_tutorial <- function(
           tmpfile <- withr::local_tempfile()
           !!render_call
         })
-      }, env = test_env)
+      }, env = test_env_vars, spinner = FALSE)
     } else {
       testthat::with_reporter(
         reporter = reporter,
-        withr::with_envvar(test_env, {
+        withr::with_envvar(test_env_vars, {
           withr::with_tempfile("tmpfile", {
             eval(render_call)
           })
@@ -317,8 +319,9 @@ test_tutorial <- function(
   if (!inherits(res, "error")) {
     testthat::succeed("Tutorial passed!")
   } else {
-    testthat::fail("Tutorial tests failed")
+    testthat::fail(sprintf("Tutorial tests failed: %s", conditionMessage(res)))
   }
 
-  invisible(path)
+  invisible(res)
 }
+
