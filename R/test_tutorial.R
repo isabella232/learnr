@@ -302,6 +302,7 @@ test_tutorial <- function(
         testthat::with_reporter(reporter = !!reporter, {
           tmpfile <- withr::local_tempfile()
           !!render_call
+          testthat::get_reporter()$end_context()
         })
       }, env = test_env_vars, spinner = FALSE)
     } else {
@@ -311,6 +312,7 @@ test_tutorial <- function(
           withr::with_tempfile("tmpfile", {
             eval(render_call)
           })
+          testthat::get_reporter()$end_context()
         })
       )
     }
