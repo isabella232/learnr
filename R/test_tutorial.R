@@ -295,34 +295,46 @@ test_tutorial <- function(
     testthat::get_reporter() %||%
     if (interactive() && !safely) "progress" else "summary"
 
-  res <- tryCatch({
+  res <-
     if (isTRUE(safely)) {
-      safe({
-        testthat::with_reporter(reporter = !!reporter, {
-          tmpfile <- withr::local_tempfile()
-          !!render_call
-          testthat::get_reporter()$end_context()
-        })
+      reporter_safe <- safe({
+        testthat::with_reporter(
+          reporter = "silent",
+          start_end_reporter = FALSE,
+          {
+            tmpfile <- withr::local_tempfile()
+            !!render_call
+            testthat::get_reporter()
+          }
+        )
       }, env = test_env_vars, spinner = FALSE)
+
+      testthat::with_reporter(
+        reporter = reporter,
+        start_end_reporter = !testthat::is_testing(),
+        {
+          local_reporter <- testthat::get_reporter()
+          local_reporter$start_file(path)
+          for (result in reporter_safe$expectations()) {
+            local_reporter$add_result(test = result$test, result = result)
+          }
+          local_reporter$end_file()
+        }
+      )
     } else {
       testthat::with_reporter(
         reporter = reporter,
+        start_end_reporter = !testthat::is_testing(),
         withr::with_envvar(test_env_vars, {
           withr::with_tempfile("tmpfile", {
+            local_reporter <- testthat::get_reporter()
+            local_reporter$start_file(path)
             eval(render_call)
+            local_reporter$end_file()
           })
-          testthat::get_reporter()$end_context()
         })
       )
     }
-  }, error = identity)
-
-  if (!inherits(res, "error")) {
-    testthat::succeed("Tutorial passed!")
-  } else {
-    testthat::fail(sprintf("Tutorial tests failed: %s", conditionMessage(res)))
-  }
 
   invisible(res)
 }
-
