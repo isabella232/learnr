@@ -387,7 +387,7 @@ safe <- function(expr, ..., show = TRUE, env = safe_env()) {
       callr::r(
         function(.exp, is_dev_loaded) {
           if (isTRUE(is_dev_loaded)) {
-            rlang::eval_bare(rlang::parse_expr("pkgload::load_all()"))
+            rlang::eval_bare(rlang::parse_expr("pkgload::load_all(quiet = TRUE)"))
           } else {
             library("learnr", character.only = TRUE, quietly = TRUE)
           }
