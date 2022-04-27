@@ -66,11 +66,10 @@ expect_feedback <- function(
   }
 
   if (!is.null(res$feedback$error)) {
-    testthat::fail(sprintf(
-      "%s returned an internal error: %s",
-      lab,
-      conditionMessage(res$feedback$error)
-    ))
+    msg <- conditionMessage(res$feedback$error)
+    testthat::fail(
+      sprintf("%s returned an internal error: %s", lab, msg)
+    )
   }
 
   feedback <- expect_valid_feedback(res$feedback, lab)
