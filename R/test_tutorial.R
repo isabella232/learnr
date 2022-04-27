@@ -241,6 +241,7 @@ test_that_exercise <- function(exercise, test_solutions = NULL) {
     rlang::eval_bare(test_that)
   }
 
+  try(testthat::get_reporter()$end_context(), silent = TRUE)
   invisible(TRUE)
 }
 
@@ -251,12 +252,13 @@ prepend_solution_tests <- function(exercise, tests) {
   }
 
   solution_tests <- list()
-  solution_passes <- sprintf(
-    "expect_feedback('{%s}', correct = TRUE)",
-    solution
+  solution_passes <- rlang::call2(
+    rlang::expr(expect_feedback),
+    rlang::parse_expr(sprintf("{%s}", solution)),
+    correct = TRUE
   )
   solution_desc <- sprintf("solution passes", exercise$label)
-  solution_tests[[solution_desc]] <- solution_passes
+  solution_tests[[solution_desc]] <- rlang::expr_text(solution_passes)
 
   c(solution_tests, tests)
 }
