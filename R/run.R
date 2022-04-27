@@ -376,16 +376,24 @@ safe <- function(expr, ..., show = TRUE, env = safe_env()) {
   # "0" or "1"
   learnr_interactive = as.character(as.numeric(isTRUE(interactive())))
 
+  is_dev_loaded <- function() {
+    if (!is_envvar_true("LEARNR_DEV_MODE", "false")) return(FALSE)
+    ns <- .getNamespace("learnr")
+    ".__DEVTOOLS__" %in% rlang::env_names(ns)
+  }
+
   callr_try_catch({
     withr::with_envvar(c(LEARNR_INTERACTIVE = learnr_interactive), {
       callr::r(
-        function(.exp) {
-          library("learnr", character.only = TRUE, quietly = TRUE)
+        function(.exp, is_dev_loaded) {
+          if (isTRUE(is_dev_loaded)) {
+            rlang::eval_bare(rlang::parse_expr("pkgload::load_all()"))
+          } else {
+            library("learnr", character.only = TRUE, quietly = TRUE)
+          }
           base::eval(.exp)
         },
-        list(
-          .exp = expr
-        ),
+        args = list(.exp = expr, is_dev_loaded()),
         ...,
         show = show,
         env = env
