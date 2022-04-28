@@ -155,6 +155,10 @@ tutorial <- function(fig_width = 6.5,
     ...
   )
 
+  if (is_testing_enabled()) {
+    require_testthat()
+  }
+
   # return new output format
   rmarkdown::output_format(knitr = knitr_options,
                            pandoc = pandoc_options,

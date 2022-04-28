@@ -4,6 +4,19 @@ is_testing_enabled <- function() {
   is_envvar_true("LEARNR_TEST") || is_envvar_true("LEARNR_TEST_SOLUTIONS")
 }
 
+require_testthat <- function() {
+  if (!is_testing_enabled()) return()
+
+  learnr_render_catch(
+    rlang::check_installed("testthat", "for testing learnr exercises")
+  )
+
+  if (is_testing_enabled() && rlang::is_installed("testthat")) {
+    # FIXME: ensure testthat::fail() doesn't clobber gradethis::fail()
+    require("testthat", character.only = TRUE, quietly = testthat::is_testing())
+  }
+}
+
 find_test_exercise <- function() {
   x <- get0("exercise", envir = .test_exercise, ifnotfound = NULL)
   if (is.null(x)) {
@@ -44,6 +57,11 @@ expect_feedback <- function(
 
   .exercise <- .exercise %||% find_test_exercise()
   .exercise[["code"]] <- expr
+  srcref <- if (!is.null(.exercise[[".srcref"]])) {
+    srcref <- .exercise[[".srcref"]]
+    attr(srcref, "srcfile")$filename <- basename(attr(srcref, "srcfile")$filename)
+    srcref
+  }
 
   .envir <- .envir %||% new.env(parent = knitr::knit_global())
 
@@ -62,17 +80,45 @@ expect_feedback <- function(
   }
 
   if (is.null(res$feedback)) {
-    testthat::fail(sprintf("%s did not return feedback", lab))
-  }
-
-  if (!is.null(res$feedback$error)) {
-    msg <- conditionMessage(res$feedback$error)
-    testthat::fail(
-      sprintf("%s returned an internal error: %s", lab, msg)
+    testthat::expect(
+      ok = FALSE,
+      failure_message = sprintf("%s did not return feedback", lab),
+      srcref = srcref
     )
   }
 
-  feedback <- expect_valid_feedback(res$feedback, lab)
+  if (!is.null(res$feedback$error)) {
+    msg <- if (rlang::is_condition(res$feedback$error)) {
+      paste0(": ", conditionMessage(res$feedback$error))
+    } else if (rlang::has_name(res$feedback$error, "message")) {
+      paste0(": ", res$feedback$error$message)
+    } else {
+      ""
+    }
+
+    if (rlang::is_condition(res$feedback$error)) {
+      msg <- conditionMessage(res$feedback$error)
+      testthat::expect(
+        ok = FALSE,
+        failure_message = sprintf("%s returned an internal error%s", lab, msg),
+        srcref = srcref
+      )
+    }
+  }
+
+  feedback_ok <- check_valid_feedback(res$feedback, lab)
+  testthat::expect(feedback_ok$ok, feedback_ok$message, srcref = srcref)
+  # use validated feedback or the one that came from the exercise result
+  feedback <- feedback_ok$result %||% res$feedback
+
+  compare <- tryCatch(local({
+    waldo_compare <- utils::getFromNamespace("waldo_compare", "testthat")
+    function(x, y, ...) {
+      waldo_compare(x, y, ..., x_arg = "actual", y_arg = "expected")
+    }
+  }), error = function(...) {
+    testthat::compare
+  })
 
   if (!is.null(correct)) {
     checkmate::assert_logical(correct, min.len = 0, max.len = 1, any.missing = FALSE)
@@ -87,24 +133,32 @@ expect_feedback <- function(
     testthat::expect(
       ok = identical(feedback$correct, correct),
       failure_message = sprintf(
-        "%s is marked as %s, expected %s",
+        "%s was not marked as %s\n%s",
         lab,
-        correct_label(feedback$correct),
-        correct_label(correct)
-      )
+        correct_label(correct),
+        compare(feedback[["correct"]], correct)
+      ),
+      srcref = srcref
     )
   }
 
   if (!is.null(message)) {
     checkmate::assert_character(message, min.len = 1, max.len = 1, any.missing = FALSE)
-    testthat::expect_match(
-      feedback$message,
-      regexp = message,
-      perl = perl,
-      fixed = fixed,
-      ignore.case = ignore.case,
-      label = sprintf("Feedback `message` from %s", lab)
+
+    cnd <- rlang::catch_cnd(
+      testthat::expect_match(
+        feedback$message,
+        regexp = message,
+        perl = perl,
+        fixed = fixed,
+        ignore.case = ignore.case,
+        label = sprintf("Feedback `message` from %s", lab)
+      )
     )
+    if (rlang::is_condition(cnd) && !is.null(srcref)) {
+      cnd$srcref <- srcref
+    }
+    testthat::exp_signal(cnd)
   }
 
   if (!is.null(type)) {
@@ -112,11 +166,12 @@ expect_feedback <- function(
     testthat::expect(
       ok = identical(feedback$type, type),
       failure_message = sprintf(
-        "%s returned feedback with type '%s', expected '%s'",
+        "%s did not return feedback with type '%s'\n%s",
         lab,
-        feedback$type,
-        type
-      )
+        type,
+        compare(feedback$type, type)
+      ),
+      srcref = srcref
     )
   }
 
@@ -125,17 +180,17 @@ expect_feedback <- function(
     testthat::expect(
       ok = identical(feedback$location, location),
       failure_message = sprintf(
-        "%s returned feedback with location '%s', expected '%s'",
+        "%s did not return feedback with location '%s'\n%s",
         lab,
-        res$feedback$location,
-        location
-      )
+        location,
+        compare(res$feedback$location, location)
+      ),
+      srcref = srcref
     )
   }
 
   extras <- list(...)
   if (length(extras) == 0) {
-    testthat::succeed()
     return(invisible(res))
   }
 
@@ -144,25 +199,29 @@ expect_feedback <- function(
   }
 
   if (is.null(names(extras))) {
-    testthat::succeed()
     return(invisible(res))
   }
 
   extras <- extras[nzchar(names(extras))]
 
   for (prop in names(extras)) {
-    testthat::expect_equal(
-      feedback[[prop]],
-      !!extras[[prop]],
-      label = sprintf("Feedback property `%s` from %s", prop, lab)
+    cnd <- rlang::catch_cnd(
+      testthat::expect_equal(
+        feedback[[prop]],
+        !!extras[[prop]],
+        label = sprintf("Feedback property `%s` from %s", prop, lab)
+      )
     )
+    if (rlang::is_condition(cnd) && !is.null(srcref)) {
+      cnd$srcref <- srcref
+    }
+    testthat::exp_signal(cnd)
   }
 
-  testthat::succeed()
   invisible(res)
 }
 
-expect_valid_feedback <- function(feedback, label = NULL) {
+check_valid_feedback <- function(feedback, label = NULL) {
   if (!rlang::is_installed("testthat")) {
     feedback_validated(feedback)
     return(invisible(feedback))
@@ -176,17 +235,50 @@ expect_valid_feedback <- function(feedback, label = NULL) {
     act$lab <- paste(act$lab, "is not")
   }
 
-  res <- tryCatch(feedback_validated(feedback), error = identity)
-
-  if (!inherits(res, "error")) {
-    testthat::succeed(sprintf("%s is valid feedback", act$lab))
-  } else {
-    msg <- sprintf("%s valid feedback: %s", act$lab, conditionMessage(res))
-    testthat::fail(msg)
-  }
-
-  invisible(res)
+  tryCatch(
+    list(
+      result = feedback_validated(feedback),
+      ok = TRUE,
+      message = sprintf("%s is valid feedback", act$lab)
+    ),
+    error = function(err) {
+      list(
+        ok = FALSE,
+        message = sprintf("%s valid feedback: %s", act$lab, conditionMessage(err))
+      )
+    }
+  )
 }
+
+# expect_with_exercise <- function(expr, exercise = NULL) {
+#   if (is.null(exercise)) {
+#     return(invisble(rlang::eval_tidy(expr)))
+#   }
+#
+#   exp <- list()
+#   withCallingHandlers(
+#     error = function(cnd) {
+#       rlang::cnd_muffle(cnd)
+#       exp <<- c(exp, list(cnd))
+#     }
+#   )
+#
+#   for (exp_this in exp) {
+#     if (!inherits(exp_this, "expectation")) {
+#       next
+#     }
+#
+#     if (!is.null(exercise[[".srcref"]])) {
+#       srcref <- exercise[[".srcref"]]
+#       attr(srcref, "srcfile")$filename <- basename(attr(srcref, "srcfile")$filename)
+#       exp_this$srcref <- srcref
+#     }
+#
+#     testthat::exp_signal(exp_this)
+#   }
+#
+#   invisible(exp)
+# }
 
 test_that_exercise <- function(exercise, test_solutions = NULL) {
   if (!rlang::is_installed("testthat")) {
@@ -212,37 +304,42 @@ test_that_exercise <- function(exercise, test_solutions = NULL) {
   test_solutions <- test_solutions %||% is_envvar_true("LEARNR_TEST_SOLUTIONS", "true")
 
   tests <- exercise[["tests"]]
-  if (!length(tests)) {
-    if (!test_solutions) {
-      # no tests and don't want to test solutions
-      return()
-    }
-  } else if (is.null(names(tests))) {
-    names(tests) <- paste("test", seq_along(tests))
+  if (is.null(tests) && !test_solutions) {
+    # no tests and don't want to test solutions
+    return()
   }
 
   if (test_solutions) {
     tests <- prepend_solution_tests(exercise, tests)
   }
 
-  names(tests) <- sprintf("[%s] - %s", exercise$label, names(tests))
-
   set_test_env("exercise", exercise)
-  testthat::context(set_test_env("label", exercise$label))
   withr::defer(clear_test_env())
 
-  for (i in seq_along(tests)) {
-    args <- list(
-      desc = names(tests)[i],
-      code = rlang::parse_expr(paste0("{", tests[[i]], "}"))
-    )
+  test_exprs <- lapply(
+    rlang::parse_exprs(tests),
+    add_label_to_description,
+    label = exercise$label
+  )
 
-    test_that <- rlang::call2("test_that", !!!args, .ns = "testthat")
-    rlang::eval_bare(test_that)
+  rlang::eval_bare(rlang::call2(`{`, !!!test_exprs))
+
+  invisible(TRUE)
+}
+
+add_label_to_description <- function(expr, label) {
+  if (!rlang::is_call(expr)) {
+    return(expr)
   }
 
-  try(testthat::get_reporter()$end_context(), silent = TRUE)
-  invisible(TRUE)
+  fn <- rlang::call_fn(expr)
+  if (!identical(fn, testthat::test_that)) {
+    return(expr)
+  }
+
+  args <- rlang::call_args(rlang::call_match(expr, fn))
+  args[["desc"]] <- sprintf("[%s] - %s", label, args[["desc"]])
+  rlang::call2("test_that", !!!args, .ns = "testthat")
 }
 
 prepend_solution_tests <- function(exercise, tests) {
@@ -251,16 +348,19 @@ prepend_solution_tests <- function(exercise, tests) {
     return(tests)
   }
 
-  solution_tests <- list()
   solution_passes <- rlang::call2(
-    rlang::expr(expect_feedback),
-    rlang::parse_expr(sprintf("{%s}", solution)),
-    correct = TRUE
+    rlang::expr(test_that),
+    .ns = "testthat",
+    desc = sprintf("solution passes", exercise$label),
+    rlang::call2(
+      rlang::expr(expect_feedback),
+      rlang::parse_expr(sprintf("{%s}", solution)),
+      correct = TRUE
+    )
   )
-  solution_desc <- sprintf("solution passes", exercise$label)
-  solution_tests[[solution_desc]] <- rlang::expr_text(solution_passes)
+  solution_passes <- rlang::expr_text(solution_passes)
 
-  c(solution_tests, tests)
+  paste(solution_passes, tests, sep = "\n\n")
 }
 
 test_tutorial <- function(
@@ -271,7 +371,7 @@ test_tutorial <- function(
   safely = TRUE,
   reporter = NULL
 ) {
-  test <- match.arg(test)
+  test <- rlang::arg_match(test)
 
   test_env_vars <- safe_env()
   if (identical(test, "all")) {
@@ -297,6 +397,13 @@ test_tutorial <- function(
     testthat::get_reporter() %||%
     if (interactive() && !safely) "progress" else "summary"
 
+  is_testing <- testthat::is_testing()
+  with_report_file <- function(reporter, path) {
+    if (testthat::is_testing()) return()
+    reporter$start_file(path)
+    withr::defer_parent(reporter$end_file())
+  }
+
   res <-
     if (isTRUE(safely)) {
       reporter_safe <- safe({
@@ -313,26 +420,25 @@ test_tutorial <- function(
 
       testthat::with_reporter(
         reporter = reporter,
-        start_end_reporter = !testthat::is_testing(),
+        start_end_reporter = !is_testing,
         {
           local_reporter <- testthat::get_reporter()
-          local_reporter$start_file(path)
+          with_report_file(local_reporter, path)
           for (result in reporter_safe$expectations()) {
             local_reporter$add_result(test = result$test, result = result)
           }
-          local_reporter$end_file()
         }
       )
     } else {
+      require_testthat()
       testthat::with_reporter(
         reporter = reporter,
-        start_end_reporter = !testthat::is_testing(),
+        start_end_reporter = !is_testing,
         withr::with_envvar(test_env_vars, {
           withr::with_tempfile("tmpfile", {
             local_reporter <- testthat::get_reporter()
-            local_reporter$start_file(path)
+            with_report_file(local_reporter, path)
             eval(render_call)
-            local_reporter$end_file()
           })
         })
       )

@@ -390,7 +390,7 @@ tutorial_knitr_options <- function() {
             error_check = error_check_chunk,
             check = check_chunk,
             solution  = solution,
-            tests = split_code_headers(tests, "test"),
+            tests = tests,
             options = options[setdiff(names(options), "tutorial")],
             engine = options$engine,
             label = options$label,
@@ -409,6 +409,8 @@ tutorial_knitr_options <- function() {
         )
 
         if (is_testing_enabled()) {
+          this_exercise[[".srcref"]] <- exercise_chunk_srcref()
+          require_testthat()
           withr::with_options(
             c('knitr.duplicate.label' = 'allow'),
             test_that_exercise(this_exercise)
@@ -530,4 +532,95 @@ verify_tutorial_chunk_label <- function() {
       call. = FALSE
     )
   }
+}
+
+exercise_chunk_srcref <- function(
+  chunk = knitr::opts_current$get("label"),
+  file = knitr::current_input(dir = TRUE)
+) {
+  chunks <- knitr_chunk_source_lines(file)
+  chunk_lines <- chunks[[chunk]]
+
+  srcref(
+    srcfile = srcfile(file),
+    lloc = chunk_lines
+  )
+}
+
+.source_lines_env <- new.env(parent = emptyenv())
+
+knitr_chunk_source_lines <- function(file = knitr::current_input(dir = TRUE)) {
+  file_modified <- file.mtime(file)
+  if (file %in% rlang::env_names(.source_lines_env)) {
+    file_cached <- rlang::env_get(.source_lines_env, file)
+    if (identical(file_modified, file_cached$modified)) {
+      return(file_cached$chunks)
+    }
+  }
+  res <- list(
+    modified = file_modified,
+    chunks = callr::r(
+      knitr_chunk_source_lines_impl,
+      list(file = file),
+      spinner = FALSE
+    )
+  )
+  assign(file, res, envir = .source_lines_env)
+  res[["chunks"]]
+}
+
+knitr_chunk_source_lines_impl <- function(file = knitr::current_input(dir = TRUE)) {
+  withr::defer(knitr::knit_code$restore())
+
+  read_utf8  <- utils::getFromNamespace("read_utf8", "rmarkdown")
+  split_file <- utils::getFromNamespace("split_file", "knitr")
+
+  blocks <- tryCatch(
+    split_file(read_utf8(file), patterns = knitr::all_patterns$md),
+    error = function(err) {
+      rlang::abort(sprintf("Unable to parse document: `%s`", file), parent = err)
+    }
+  )
+
+  idx_line <- 1
+
+  blocks <- lapply(blocks, function(el) {
+    label <- el$params$label
+
+    src_loc <- function(src, extra = 0) {
+      len <- length(src) + extra
+      on.exit({
+        # move line to next block after preparing current location
+        idx_line <<- idx_line + len
+      })
+
+      last_line  <- idx_line + len - 1
+      last_nchar <- nchar(src[length(src)]) + 1
+
+      c(
+        idx_line,   # start line
+        1,          # start column
+        last_line,  # end line
+        last_nchar  # end column
+      )
+    }
+
+    location <-
+      if (!is.null(label)) {
+        # code chunk (add two for chunk header)
+        src_loc(knitr::knit_code$get(label), extra = 2)
+      } else {
+        # non-code chunk
+        src_loc(el$input.src)
+      }
+
+    list(label = label, location = location)
+  })
+
+  chunks <- Filter(blocks, f = function(x) !is.null(x$label))
+
+  chunk_locations <- lapply(chunks, `[[`, "location")
+  names(chunk_locations) <- vapply(chunks, `[[`, character(1), "label")
+
+  chunk_locations
 }
