@@ -2,6 +2,9 @@
 # install knitr hooks when package is attached to search path
 .onAttach <- function(libname, pkgname) {
   install_knitr_hooks()
+  if (is_testing_enabled() && rlang::is_installed("testthat")) {
+    require("testthat", character.only = TRUE, quietly = TRUE)
+  }
   initialize_tutorial()
 }
 
